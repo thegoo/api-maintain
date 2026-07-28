@@ -55,4 +55,4 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening issues or pull req
 
 ## License
 
-License selection is intentionally deferred until the project's governance establishes the desired intellectual property and adoption strategy. See [LICENSE](LICENSE).
+This project is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
