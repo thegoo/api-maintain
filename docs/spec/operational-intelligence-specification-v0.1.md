@@ -652,6 +652,8 @@ summary
 findings
 ```
 
+`assessmentId` MUST be a GUID represented as a canonical hyphenated string in the form `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`.
+
 ### 12.2 Status Values
 
 `status` MUST be one of:
@@ -668,7 +670,7 @@ unable_to_assess
 ```json
 {
   "specVersion": "0.1",
-  "assessmentId": "01J4ABCD1234EFGH5678JKLMNP",
+  "assessmentId": "7d9f4b3e-6c21-4a8d-9f52-1e7b3c6a0d45",
   "service": {
     "name": "sample-api"
   },
@@ -703,7 +705,7 @@ unable_to_assess
 ```json
 {
   "specVersion": "0.1",
-  "assessmentId": "01J4ABCD1234EFGH5678JKLMNQ",
+  "assessmentId": "2a6e8c1d-5b47-4f90-a3d2-8c1e6b7f4a59",
   "service": {
     "name": "sample-api"
   },
