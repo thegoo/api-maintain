@@ -371,6 +371,15 @@ The collector MUST NOT:
 - determine assessment status; or
 - perform remediation.
 
+### 9.2.1 Handled Exception Instrumentation
+
+When application or framework error handling catches an exception associated with an active OpenTelemetry span, a conforming implementation MUST, before that span ends:
+
+- record the exception as an OpenTelemetry exception event on the active span; and
+- set the active span status to `ERROR`.
+
+This requirement applies when the exception is converted into a sanitized HTTP error response. Handling the exception MUST NOT prevent the collector from observing its exception event, and recording the event MUST NOT expose additional error details to the client.
+
 ### 9.3 Internal Collection Request
 
 The Assessment Coordinator MUST provide an internal request containing:
@@ -935,7 +944,7 @@ A version 0.1 POC is complete only when all of the following are demonstrated:
 7. `QUERY /intel` accepts a valid relative time range.
 8. `QUERY /intel` accepts a valid absolute time range.
 9. `QUERY /intel` rejects ranges exceeding the configured maximum.
-10. A generated exception is collected and returned as a finding.
+10. A generated exception handled by application or framework error handling is recorded on its active span with `ERROR` status, collected, and returned as a finding.
 11. A generated HTTP 5xx response is collected and returned as a finding.
 12. No matching negative-path evidence returns `no_findings`.
 13. Telemetry unavailability returns `unable_to_assess`.
@@ -975,7 +984,9 @@ Given a request containing unsupported fields, when `QUERY /intel` is requested,
 
 ### AC-007 — Exception Finding
 
-Given an exception event occurs within the assessed time range, when `/intel` executes, then the response MUST contain an exception finding supported by normalized evidence.
+Given an exception associated with an active OpenTelemetry span is caught by application or framework error handling, when the error response is produced, then the implementation MUST record an exception event on the active span and MUST set the span status to `ERROR` before the span ends.
+
+Given that recorded exception event occurs within the assessed time range, when `/intel` executes, then the response MUST contain an exception finding supported by normalized evidence.
 
 ### AC-008 — HTTP 5xx Finding
 
