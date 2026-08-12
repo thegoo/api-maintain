@@ -669,7 +669,9 @@ summary
 findings
 ```
 
-`assessmentId` MUST be a GUID represented as a canonical hyphenated string in the form `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`.
+`assessmentId` MUST be a UUID version 4 represented as a lowercase canonical hyphenated string in the form `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`, where `y` is one of `8`, `9`, `a`, or `b`.
+
+Consumers of successful assessment responses MUST ignore unknown fields that they do not understand. Unknown response fields are reserved for forward-compatible extension and MUST NOT cause response processing to fail.
 
 ### 12.2 Status Values
 
@@ -681,6 +683,24 @@ findings
 partial
 unable_to_assess
 ```
+
+The `summary` object MUST contain:
+
+```text
+uniqueFindingCount
+exceptionCount
+http5xxCount
+```
+
+`uniqueFindingCount` MUST equal the number of objects in the top-level `findings` array. It counts distinct grouped findings in the response and MUST NOT be interpreted as the sum of the occurrence counts represented by those findings.
+
+`exceptionCount` MUST equal the sum of `count` across findings whose `category` is `exceptions`.
+
+`http5xxCount` MUST equal the sum of `count` across findings whose `category` is `http_5xx`.
+
+Because one operational event MAY contribute to findings in more than one category, consumers MUST NOT sum `exceptionCount` and `http5xxCount` to infer a count of unique operational events.
+
+The `summary.message` field MUST be present when `status` is `no_findings`. It MAY be present for any other status.
 
 ### 12.3 Example: No Findings
 
@@ -708,7 +728,7 @@ unable_to_assess
   },
   "status": "no_findings",
   "summary": {
-    "findingCount": 0,
+    "uniqueFindingCount": 0,
     "exceptionCount": 0,
     "http5xxCount": 0,
     "message": "No configured negative-path evidence was observed during the assessed time range."
@@ -743,7 +763,7 @@ unable_to_assess
   },
   "status": "findings",
   "summary": {
-    "findingCount": 2,
+    "uniqueFindingCount": 2,
     "exceptionCount": 3,
     "http5xxCount": 2,
     "message": "Configured negative-path evidence was observed during the assessed time range."
@@ -825,12 +845,18 @@ evidence
 
 `severity` MUST equal `error` in version 0.1.
 
+The `severity` field is reserved for forward-compatible severity values in a future specification version. Version 0.1 producers MUST emit `error`, and version 0.1 consumers MUST NOT infer finer-grained severity from this field.
+
 `category` MUST be one of:
 
 ```text
 exceptions
 http_5xx
 ```
+
+The `id` field MUST be unique within the containing assessment response. It identifies only that finding object in that response and MUST NOT be treated as stable across assessments. Consumers correlating findings across assessments SHOULD use the finding's `category` and `dimensions` rather than `id`.
+
+The `count` field MUST equal the total number of occurrences represented by that specific grouped finding. It is not a count of finding objects.
 
 Evidence returned per finding MUST NOT exceed `output.maximumEvidencePerFinding`.
 
@@ -1029,6 +1055,20 @@ Given `/intel` emits its own telemetry, when later assessments execute, then `/i
 ### AC-014 — No Remediation
 
 Given findings are produced, when the assessment completes, then the implementation MUST NOT modify application state, create work items, send notifications, or perform remediation.
+
+### AC-015 — Response Summary Semantics
+
+Given a successful assessment response, then `uniqueFindingCount` MUST equal the number of objects in `findings`, `exceptionCount` MUST equal the sum of `count` across exception findings, and `http5xxCount` MUST equal the sum of `count` across HTTP 5xx findings.
+
+Given the response status is `no_findings`, then `summary.message` MUST be present.
+
+### AC-016 — Finding Identity and Forward Compatibility
+
+Given a successful assessment response contains multiple findings, then every finding `id` MUST be unique within that response.
+
+Given equivalent findings occur in separate assessments, then consumers MUST NOT rely on finding `id` remaining stable across those responses and SHOULD correlate them using `category` and `dimensions`.
+
+Given a successful assessment response contains an unknown field, then a conforming consumer MUST ignore that field and continue processing all fields it understands.
 
 ## 18. Suggested Implementation Boundaries
 
