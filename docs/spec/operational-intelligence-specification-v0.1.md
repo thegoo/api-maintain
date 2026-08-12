@@ -482,6 +482,8 @@ exception
 http_5xx
 ```
 
+Each normalized evidence record MUST represent exactly one observed occurrence. A normalized evidence record MUST NOT aggregate multiple occurrences.
+
 The normalized record MUST NOT contain by default:
 
 - request bodies;
@@ -792,6 +794,24 @@ The `summary.message` field MUST be present when `status` is `no_findings`. It M
           "category": "exception",
           "exceptionType": "System.InvalidOperationException",
           "exceptionMessage": "Order state was invalid."
+        },
+        {
+          "timestamp": "2026-07-30T00:08:21Z",
+          "traceId": "7a3c1e9b5d2f4a608c7e1b3d9f5a2c40",
+          "spanId": "1b2c3d4e5f607182",
+          "operationName": "POST /orders",
+          "category": "exception",
+          "exceptionType": "System.InvalidOperationException",
+          "exceptionMessage": "Order state was invalid."
+        },
+        {
+          "timestamp": "2026-07-30T00:12:44Z",
+          "traceId": "9d2f6a1c4b8e30f57c1a6d9e2b4f7083",
+          "spanId": "2c3d4e5f60718293",
+          "operationName": "POST /orders",
+          "category": "exception",
+          "exceptionType": "System.InvalidOperationException",
+          "exceptionMessage": "Order state was invalid."
         }
       ]
     },
@@ -819,6 +839,16 @@ The `summary.message` field MUST be present when `status` is `no_findings`. It M
           "httpMethod": "POST",
           "httpRoute": "/orders",
           "httpStatusCode": 500
+        },
+        {
+          "timestamp": "2026-07-30T00:12:44Z",
+          "traceId": "9d2f6a1c4b8e30f57c1a6d9e2b4f7083",
+          "spanId": "2c3d4e5f60718293",
+          "operationName": "POST /orders",
+          "category": "http_5xx",
+          "httpMethod": "POST",
+          "httpRoute": "/orders",
+          "httpStatusCode": 500
         }
       ]
     }
@@ -826,7 +856,41 @@ The `summary.message` field MUST be present when `status` is `no_findings`. It M
 }
 ```
 
-### 12.5 Finding Requirements
+### 12.5 Example: Truncated Evidence
+
+The following finding assumes `output.includeEvidence` is `true` and `output.maximumEvidencePerFinding` is `1`:
+
+```json
+{
+  "id": "finding-001",
+  "category": "exceptions",
+  "severity": "error",
+  "title": "Unhandled InvalidOperationException observed",
+  "description": "Three InvalidOperationException events were observed for POST /orders.",
+  "firstObservedAt": "2026-07-30T00:03:10Z",
+  "lastObservedAt": "2026-07-30T00:12:44Z",
+  "count": 3,
+  "dimensions": {
+    "exceptionType": "System.InvalidOperationException",
+    "operationName": "POST /orders",
+    "httpRoute": "/orders"
+  },
+  "evidence": [
+    {
+      "timestamp": "2026-07-30T00:03:10Z",
+      "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "spanId": "00f067aa0ba902b7",
+      "operationName": "POST /orders",
+      "category": "exception",
+      "exceptionType": "System.InvalidOperationException",
+      "exceptionMessage": "Order state was invalid."
+    }
+  ],
+  "evidenceTruncated": true
+}
+```
+
+### 12.6 Finding Requirements
 
 Each finding MUST contain:
 
@@ -840,7 +904,6 @@ firstObservedAt
 lastObservedAt
 count
 dimensions
-evidence
 ```
 
 `severity` MUST equal `error` in version 0.1.
@@ -858,15 +921,23 @@ The `id` field MUST be unique within the containing assessment response. It iden
 
 The `count` field MUST equal the total number of occurrences represented by that specific grouped finding. It is not a count of finding objects.
 
-Evidence returned per finding MUST NOT exceed `output.maximumEvidencePerFinding`.
+When `output.includeEvidence` is `true`, each finding MUST contain an `evidence` array. When `output.includeEvidence` is `false`, each finding MUST omit both `evidence` and `evidenceTruncated`. Evidence suppression is not evidence truncation, and `count` MUST remain present.
 
-When additional evidence exists, the finding SHOULD include:
+When `output.includeEvidence` is `true`, evidence returned per finding MUST NOT exceed `output.maximumEvidencePerFinding`.
+
+When `count` is less than or equal to `output.maximumEvidencePerFinding`, the `evidence` array MUST contain exactly `count` records and `evidenceTruncated` MUST be omitted.
+
+When `count` is greater than `output.maximumEvidencePerFinding`, the `evidence` array MUST contain exactly `output.maximumEvidencePerFinding` records and the finding MUST contain:
 
 ```json
 {
   "evidenceTruncated": true
 }
 ```
+
+The `evidenceTruncated` field MUST NOT be present with a value of `false`.
+
+Version 0.1 producers MUST NOT emit `totalEvidenceCount`. The required finding-level `count` already reports the total occurrences represented by the finding regardless of whether evidence is complete, truncated, or suppressed.
 
 ## 13. Error Handling
 
@@ -1069,6 +1140,16 @@ Given a successful assessment response contains multiple findings, then every fi
 Given equivalent findings occur in separate assessments, then consumers MUST NOT rely on finding `id` remaining stable across those responses and SHOULD correlate them using `category` and `dimensions`.
 
 Given a successful assessment response contains an unknown field, then a conforming consumer MUST ignore that field and continue processing all fields it understands.
+
+### AC-017 — Evidence Output
+
+Given `output.includeEvidence` is `true` and a finding `count` does not exceed `output.maximumEvidencePerFinding`, then the finding MUST contain exactly `count` evidence records and MUST omit `evidenceTruncated`.
+
+Given `output.includeEvidence` is `true` and a finding `count` exceeds `output.maximumEvidencePerFinding`, then the finding MUST contain exactly `output.maximumEvidencePerFinding` evidence records and MUST contain `evidenceTruncated` with the value `true`.
+
+Given `output.includeEvidence` is `false`, then every finding MUST omit `evidence` and `evidenceTruncated` while retaining `count`.
+
+Given no normalized evidence records match an enabled category, then the analyzer MUST NOT produce a finding for that category.
 
 ## 18. Suggested Implementation Boundaries
 
