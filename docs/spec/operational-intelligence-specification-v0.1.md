@@ -388,6 +388,34 @@ When an operation fails without an exception, the implementation MUST set the sp
 
 Recording an exception or error status MUST NOT expose additional error details to the client.
 
+### 9.2.2 Retention and Capacity Eviction
+
+The collector MUST evaluate retention using each normalized evidence record's `timestamp`.
+
+For an evaluation instant `now`, the retention cutoff MUST be:
+
+```text
+now - telemetry.collector.retention
+```
+
+A record whose `timestamp` is earlier than the retention cutoff MUST be treated as expired and MUST NOT be returned by a collection request. A record whose `timestamp` equals the retention cutoff is not expired.
+
+Before enforcing `telemetry.collector.maxRecords`, the collector MUST remove all expired records. If the remaining record count exceeds `telemetry.collector.maxRecords`, the collector MUST evict records in oldest-first order until the configured bound is satisfied.
+
+Oldest-first order MUST be determined by ascending evidence `timestamp`. When two or more records have the same `timestamp`, the collector MUST use their insertion order as the tie-breaker and evict the record inserted earliest first.
+
+The collector MUST apply this ordering independently of the collector's internal storage iteration order.
+
+### 9.2.3 Consistent Snapshot Reads
+
+Each collection request MUST evaluate a logically consistent snapshot of the collector at one read instant.
+
+The snapshot MUST include every eligible record committed before that read instant and MUST exclude every record committed after it. Records written concurrently with the read MUST appear either wholly in that snapshot or wholly in a subsequent snapshot; a collection result MUST NOT contain a partially written record or otherwise reflect a partially applied write.
+
+Retention evaluation, requested time-range filtering, category filtering, and result construction for one collection request MUST operate against the same logical snapshot.
+
+These requirements apply to both single-threaded and multi-threaded runtimes. They define observable behavior and MUST NOT be interpreted as requiring a particular locking, synchronization, or data-structure implementation.
+
 ### 9.3 Internal Collection Request
 
 The Assessment Coordinator MUST provide an internal request containing:
@@ -1113,27 +1141,39 @@ Given telemetry cannot be collected, when `/intel` executes successfully, then t
 
 ### AC-011 — Bounded Collection
 
-Given the retention duration or record limit is exceeded, when new evidence is collected, then the collector MUST evict evidence according to its configured bounds.
+Given a record timestamp is earlier than the retention cutoff, when retention is evaluated, then the collector MUST remove the record before enforcing the maximum record count and MUST NOT return it in a collection result.
 
-### AC-012 — Existing Export Preserved
+Given a record timestamp equals the retention cutoff, when retention is evaluated, then the collector MUST NOT remove the record as expired.
+
+Given the non-expired record count exceeds `telemetry.collector.maxRecords`, when the bound is enforced, then the collector MUST evict records by ascending evidence timestamp until the configured bound is satisfied.
+
+Given multiple records share the oldest evidence timestamp, when capacity eviction is required, then the collector MUST evict those records in insertion order, earliest inserted first.
+
+### AC-012 — Consistent Collector Snapshot
+
+Given records are written while a collection request executes, when the collector constructs the result, then each concurrent record MUST appear either wholly in that result or wholly in a subsequent result and MUST NOT appear partially.
+
+Given a collection request evaluates retention, time-range filtering, category filtering, and result construction, then all operations MUST use the same logical snapshot.
+
+### AC-013 — Existing Export Preserved
 
 Given normal OpenTelemetry export is configured, when the bounded collector is enabled, then telemetry MUST continue to appear in Aspire.
 
-### AC-013 — Recursive Findings Prevented
+### AC-014 — Recursive Findings Prevented
 
 Given `/intel` emits its own telemetry, when later assessments execute, then `/intel` telemetry MUST NOT create exception or HTTP 5xx findings by default.
 
-### AC-014 — No Remediation
+### AC-015 — No Remediation
 
 Given findings are produced, when the assessment completes, then the implementation MUST NOT modify application state, create work items, send notifications, or perform remediation.
 
-### AC-015 — Response Summary Semantics
+### AC-016 — Response Summary Semantics
 
 Given a successful assessment response, then `uniqueFindingCount` MUST equal the number of objects in `findings`, `exceptionCount` MUST equal the sum of `count` across exception findings, and `http5xxCount` MUST equal the sum of `count` across HTTP 5xx findings.
 
 Given the response status is `no_findings`, then `summary.message` MUST be present.
 
-### AC-016 — Finding Identity and Forward Compatibility
+### AC-017 — Finding Identity and Forward Compatibility
 
 Given a successful assessment response contains multiple findings, then every finding `id` MUST be unique within that response.
 
@@ -1141,7 +1181,7 @@ Given equivalent findings occur in separate assessments, then consumers MUST NOT
 
 Given a successful assessment response contains an unknown field, then a conforming consumer MUST ignore that field and continue processing all fields it understands.
 
-### AC-017 — Evidence Output
+### AC-018 — Evidence Output
 
 Given `output.includeEvidence` is `true` and a finding `count` does not exceed `output.maximumEvidencePerFinding`, then the finding MUST contain exactly `count` evidence records and MUST omit `evidenceTruncated`.
 
