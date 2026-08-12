@@ -270,6 +270,36 @@ output:
   maximumEvidencePerFinding: 25
 ```
 
+### 7.4 Excluded Route Matching
+
+Each `telemetry.excludeRoutes` entry MUST be a case-sensitive path pattern. A pattern without `*` is an exact pattern. A pattern containing `*` is a wildcard pattern.
+
+For each request, the implementation MUST select one candidate path for exclusion matching:
+
+1. the normalized OpenTelemetry route template, when available; otherwise
+2. the raw request path with its query string and fragment removed.
+
+The candidate path MUST NOT include the scheme, host, port, query string, or fragment. When a normalized route template is available, the implementation MUST use it and MUST NOT also compare the raw request path.
+
+Matching MUST evaluate the complete candidate path. The `*` wildcard MUST match zero or more characters, including `/`. No implicit wildcard is added before or after a configured pattern. Version 0.1 defines no other wildcard metacharacters or escaping rules.
+
+Examples:
+
+| Pattern | Candidate path | Result |
+|---|---|---|
+| `/intel` | `/intel` | match |
+| `/intel` | `/v1/intel` | no match |
+| `*/intel` | `/v1/intel` | match |
+| `*/intel/*` | `/v1/intel/history/details` | match |
+| `*/intel` | `/v1/intel/status` | no match |
+| `/orders/{id}` | `/orders/{id}` | match |
+| `/orders/{id}` | `/orders/123` | no match when the normalized route template is available |
+| `/orders/123` | `/orders/123` | match after the raw request target `/orders/123?verbose=true` is normalized |
+
+A request whose candidate path matches any configured pattern MUST be excluded from negative-path assessment.
+
+If neither a normalized route template nor a raw request path is available, configured path matching cannot be performed. The implementation MUST nevertheless prevent every `/intel` endpoint from creating recursive findings by using an equivalent safeguard, such as an internal request marker or instrumentation-scope exclusion.
+
 ## 8. Profile Validation
 
 ### 8.1 Validation Timing
@@ -301,7 +331,7 @@ The validator MUST confirm:
 - `query.maximumTimeRange` does not exceed collector retention;
 - `output.includeEvidence` is a boolean;
 - `output.maximumEvidencePerFinding` is a positive integer; and
-- `/intel` is excluded unless an implementation explicitly provides an equivalent recursive-assessment safeguard.
+- at least one `telemetry.excludeRoutes` pattern excludes every configured `/intel` endpoint, unless the implementation explicitly provides an equivalent recursive-assessment safeguard.
 
 ### 8.3 Invalid Configuration
 
@@ -1021,6 +1051,57 @@ Use `unable_to_assess` when the protocol executed successfully but operational e
 
 Use a Problem Details error when the `/intel` protocol itself failed.
 
+### 13.6 Rate Limit Exceeded
+
+When an implementation rejects an `/intel` request because of rate limiting, it MUST return:
+
+```http
+429 Too Many Requests
+Content-Type: application/problem+json
+Retry-After: <delay-seconds-or-http-date>
+```
+
+The response body MUST conform to RFC 9457 Problem Details. Its `type` MUST be `urn:op-intel:problem:rate-limit-exceeded`, and it MUST include the extension member:
+
+```json
+{
+  "code": "rate_limit_exceeded"
+}
+```
+
+The `Retry-After` value MUST identify when the client may make a subsequent request. This specification does not prescribe a retry duration.
+
+Example:
+
+```json
+{
+  "type": "urn:op-intel:problem:rate-limit-exceeded",
+  "title": "Assessment request rate limit exceeded",
+  "status": 429,
+  "detail": "Retry the assessment request after the interval indicated by the Retry-After header.",
+  "instance": "/intel",
+  "code": "rate_limit_exceeded"
+}
+```
+
+### 13.7 Rate-Limiting and Cache Guidance
+
+The numeric rate limit, enforcement scope, and coordination model are implementation-specific. Implementations SHOULD select limits based on assessment cost and deployment capacity rather than adopting a value from this specification.
+
+Implementations SHOULD:
+
+- prevent unbounded queued assessment work;
+- consider whether enforcement is per service instance or shared across instances;
+- account separately for the cost of executing an assessment and serving a cached response;
+- behave deterministically for requests evaluated against the same limiter state; and
+- continue emitting telemetry for rate-limited `/intel` requests.
+
+An implementation MAY cache successful assessment responses to reduce repeated assessment work. Caching MUST NOT replace rate limiting. Cache duration and invalidation policy are implementation-specific.
+
+A cached response MUST preserve the original `assessmentId` and `generatedAt`. An implementation MUST NOT present a cached response as a newly executed assessment. A cached response MUST satisfy the request's effective assessment scope and MUST NOT be reused for a different scope.
+
+Telemetry for rate-limited or cached `/intel` requests MUST remain excluded from negative-path assessment by the same route exclusion or equivalent recursive-assessment safeguard used for other `/intel` traffic.
+
 ## 14. Telemetry and Logging
 
 All `/intel` interactions MUST emit telemetry.
@@ -1190,6 +1271,24 @@ Given `output.includeEvidence` is `true` and a finding `count` exceeds `output.m
 Given `output.includeEvidence` is `false`, then every finding MUST omit `evidence` and `evidenceTruncated` while retaining `count`.
 
 Given no normalized evidence records match an enabled category, then the analyzer MUST NOT produce a finding for that category.
+
+### AC-019 — Route Exclusion
+
+Given a normalized route template is available, when exclusion patterns are evaluated, then the implementation MUST match only the complete normalized route template and MUST NOT match the raw request path.
+
+Given no normalized route template is available but a raw request path is available, when exclusion patterns are evaluated, then the implementation MUST remove the query string and fragment before matching the complete raw path.
+
+Given an exclusion pattern contains `*`, when it is evaluated, then each `*` MUST match zero or more characters including `/`.
+
+Given no route template or raw path is available for an `/intel` request, then an equivalent safeguard MUST prevent that request's telemetry from creating recursive findings.
+
+### AC-020 — Rate-Limited Assessment
+
+Given an `/intel` request is rejected by rate limiting, then the implementation MUST return HTTP `429`, RFC 9457 Problem Details with code `rate_limit_exceeded`, and a valid `Retry-After` header.
+
+Given a rate-limited `/intel` request emits telemetry, when later assessments execute, then that telemetry MUST NOT create exception or HTTP 5xx findings.
+
+Given a cached assessment response is returned, then its `assessmentId`, `generatedAt`, and effective assessment scope MUST describe the original assessment and MUST NOT imply that a new assessment executed.
 
 ## 18. Suggested Implementation Boundaries
 

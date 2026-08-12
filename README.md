@@ -53,6 +53,8 @@ Current work is formalizing decisions identified during proof-of-concept review.
 - Each finding's `count` reports the occurrences represented by that finding.
 - Evidence arrays are bounded by `output.maximumEvidencePerFinding`.
 - `output.includeEvidence` controls whether supporting evidence records are returned.
+- `telemetry.excludeRoutes` supports exact and `*` wildcard path matching, with an independent safeguard against recursive `/intel` findings.
+- Rate-limited assessment requests use HTTP `429`, RFC 9457 Problem Details, and `Retry-After`; numeric limits remain deployment-specific.
 
 The specification remains experimental until it has been validated by multiple reference implementations and real-world usage.
 
