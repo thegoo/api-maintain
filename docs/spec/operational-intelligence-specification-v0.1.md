@@ -29,7 +29,8 @@ The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHALL**, **SHALL NOT**, **
 Version 0.1 includes:
 
 - `GET /intel`
-- `QUERY /intel`
+- `POST /intel`
+- optional `QUERY /intel` compatibility
 - local configuration through `op-intel.yaml`
 - configuration validation
 - relative and absolute assessment time ranges
@@ -112,15 +113,19 @@ A conforming protocol implementation MUST support:
 
 ```http
 GET /intel
-QUERY /intel
+POST /intel
 ```
+
+An implementation MAY additionally support `QUERY /intel`. `POST /intel` MUST remain supported for the lifetime of version 0.1 even when `QUERY /intel` is available. An implementation MUST NOT require clients to use `QUERY`.
 
 An implementation MAY mount the resource beneath an API-wide prefix, such as:
 
 ```http
 GET /v1/intel
-QUERY /v1/intel
+POST /v1/intel
 ```
+
+An implementation that supports `QUERY` MAY also expose `QUERY /v1/intel` at the same mounted resource.
 
 The final path segment MUST be `intel`.
 
@@ -129,7 +134,8 @@ The final path segment MUST be `intel`.
 ```text
 API
  ├── GET /intel
- ├── QUERY /intel
+ ├── POST /intel
+ ├── QUERY /intel (optional compatibility method)
  │
  └── Assessment Coordinator
        ├── Profile Loader and Validator
@@ -565,7 +571,7 @@ through
 generatedAt
 ```
 
-For `QUERY /intel`, the effective time range MUST be resolved from the request.
+For `POST /intel` and supported `QUERY /intel`, the effective time range MUST be resolved from the request.
 
 The implementation MUST NOT automatically widen the time range when no evidence is found.
 
@@ -659,9 +665,9 @@ Example:
 GET /intel
 ```
 
-### 11.2 QUERY /intel
+### 11.2 POST /intel
 
-`QUERY /intel` executes an assessment with a caller-supplied time range.
+`POST /intel` executes an assessment with a caller-supplied time range.
 
 Version 0.1 supports only a time range override.
 
@@ -693,9 +699,37 @@ Absolute request:
 
 The requested range MUST NOT exceed `query.maximumTimeRange`.
 
-When `query.allowTimeRangeOverride` is `false`, `QUERY /intel` MUST return a machine-readable error.
+When `query.allowTimeRangeOverride` is `false`, `POST /intel` and supported `QUERY /intel` MUST return the same machine-readable error.
 
-### 11.3 Unsupported Query Fields
+### 11.3 Optional QUERY Compatibility
+
+An implementation MAY support `QUERY /intel` when its complete request path supports the method. A supported `QUERY /intel` request MUST use the same request body and MUST have the same validation, scope resolution, response, error, rate-limiting, caching, telemetry, and security semantics as `POST /intel`.
+
+Supporting `QUERY /intel` MUST NOT create a separate protocol contract and MUST NOT remove or restrict `POST /intel` support.
+
+QUERY adoption remains limited across OpenAPI tooling, generated clients, frameworks, proxies, gateways, servers, and middleware. Clients SHOULD use `POST /intel` unless they have verified end-to-end QUERY support. Clients MAY use `QUERY /intel` when every relevant component in the request path is known to support it. Clients SHOULD NOT select QUERY through trial-and-error requests that may be rejected or transformed before reaching the application.
+
+Version 0.1 defines no capability-discovery endpoint.
+
+When `QUERY /intel` is unsupported and the request reaches the application, the implementation MUST NOT execute an assessment and MUST return:
+
+```http
+405 Method Not Allowed
+Allow: GET, POST
+Content-Type: application/problem+json
+```
+
+The response body MUST conform to RFC 9457 Problem Details. Its `type` MUST be `urn:op-intel:problem:query-method-not-supported`, and it MUST include:
+
+```json
+{
+  "code": "query_method_not_supported"
+}
+```
+
+Hosting infrastructure MAY reject QUERY before the request reaches the application. The preceding response requirements apply when the application receives the unsupported method.
+
+### 11.4 Unsupported Scoped-Assessment Fields
 
 Unknown request fields MUST cause request validation failure.
 
@@ -1005,7 +1039,7 @@ Protocol and configuration errors MUST use RFC 9457 Problem Details with content
 application/problem+json
 ```
 
-### 13.1 Malformed QUERY Request
+### 13.1 Malformed Scoped-Assessment Request
 
 Recommended status:
 
@@ -1013,7 +1047,7 @@ Recommended status:
 400 Bad Request
 ```
 
-### 13.2 Unsupported QUERY Override
+### 13.2 Unsupported Scope Override
 
 Recommended status:
 
@@ -1051,7 +1085,11 @@ Use `unable_to_assess` when the protocol executed successfully but operational e
 
 Use a Problem Details error when the `/intel` protocol itself failed.
 
-### 13.6 Rate Limit Exceeded
+### 13.6 Unsupported QUERY Method
+
+An unsupported `QUERY /intel` request that reaches the application MUST use the HTTP `405` and Problem Details response defined in Section 11.3.
+
+### 13.7 Rate Limit Exceeded
 
 When an implementation rejects an `/intel` request because of rate limiting, it MUST return:
 
@@ -1084,7 +1122,7 @@ Example:
 }
 ```
 
-### 13.7 Rate-Limiting and Cache Guidance
+### 13.8 Rate-Limiting and Cache Guidance
 
 The numeric rate limit, enforcement scope, and coordination model are implementation-specific. Implementations SHOULD select limits based on assessment cost and deployment capacity rather than adopting a value from this specification.
 
@@ -1155,9 +1193,9 @@ A version 0.1 POC is complete only when all of the following are demonstrated:
 4. A valid profile permits `/intel` assessments.
 5. An invalid profile produces a machine-readable configuration error.
 6. `GET /intel` uses the profile default time range.
-7. `QUERY /intel` accepts a valid relative time range.
-8. `QUERY /intel` accepts a valid absolute time range.
-9. `QUERY /intel` rejects ranges exceeding the configured maximum.
+7. `POST /intel` accepts a valid relative time range.
+8. `POST /intel` accepts a valid absolute time range.
+9. `POST /intel` rejects ranges exceeding the configured maximum.
 10. A generated exception that causes its instrumented operation to fail is recorded on its active span, the span status is set to `ERROR`, and the exception is collected and returned as a finding.
 11. A generated HTTP 5xx response is collected and returned as a finding.
 12. No matching negative-path evidence returns `no_findings`.
@@ -1190,11 +1228,11 @@ Given a valid profile, when `GET /intel` is requested, then the implementation M
 
 ### AC-005 — Scoped Assessment
 
-Given a valid override within the configured maximum, when `QUERY /intel` is requested, then the implementation MUST assess exactly the requested time range.
+Given a valid override within the configured maximum, when `POST /intel` is requested, then the implementation MUST assess exactly the requested time range.
 
 ### AC-006 — Unsupported Scope
 
-Given a request containing unsupported fields, when `QUERY /intel` is requested, then the implementation MUST reject the request.
+Given a request containing unsupported fields, when `POST /intel` or supported `QUERY /intel` is requested, then the implementation MUST reject the request.
 
 ### AC-007 — Exception Finding
 
@@ -1290,6 +1328,16 @@ Given a rate-limited `/intel` request emits telemetry, when later assessments ex
 
 Given a cached assessment response is returned, then its `assessmentId`, `generatedAt`, and effective assessment scope MUST describe the original assessment and MUST NOT imply that a new assessment executed.
 
+### AC-021 — Scoped Assessment Transport
+
+Given a valid relative or absolute time-range override, when `POST /intel` is requested, then the implementation MUST apply the request contract defined in Section 11.2.
+
+Given `query.allowTimeRangeOverride` is `false`, when `POST /intel` or supported `QUERY /intel` is requested, then both methods MUST return the same machine-readable error and MUST NOT execute an assessment.
+
+Given an implementation supports `QUERY /intel`, when equivalent POST and QUERY requests are made, then both methods MUST apply identical request, validation, scope, response, error, rate-limiting, caching, telemetry, and security semantics.
+
+Given `QUERY /intel` is unsupported and reaches the application, then the implementation MUST NOT execute an assessment and MUST return HTTP `405`, `Allow: GET, POST`, RFC 9457 Problem Details, and code `query_method_not_supported`.
+
 ## 18. Suggested Implementation Boundaries
 
 The following names are non-normative but recommended:
@@ -1342,7 +1390,8 @@ The README SHOULD document:
 - how to generate a test exception;
 - how to generate a test HTTP 500 response;
 - how to call `GET /intel`;
-- how to call `QUERY /intel`;
+- how to call `POST /intel`;
+- whether `QUERY /intel` is supported and, when it is, how to call it;
 - how to validate `op-intel.yaml`;
 - how to observe telemetry in Aspire; and
 - known POC limitations.
@@ -1376,11 +1425,11 @@ Future versions MUST preserve the separation between collection, assessment, and
 curl -i http://localhost:5000/intel
 ```
 
-### Relative QUERY assessment
+### Relative POST assessment
 
 ```bash
 curl -i \
-  -X QUERY \
+  -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "timeRange": {
@@ -1390,11 +1439,11 @@ curl -i \
   http://localhost:5000/intel
 ```
 
-### Absolute QUERY assessment
+### Absolute POST assessment
 
 ```bash
 curl -i \
-  -X QUERY \
+  -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "timeRange": {
@@ -1404,6 +1453,10 @@ curl -i \
   }' \
   http://localhost:5000/intel
 ```
+
+### Optional QUERY compatibility
+
+When the implementation and complete request path support QUERY, the same request body MAY be sent with `-X QUERY`. POST remains required throughout version 0.1.
 
 ## Appendix B — POC Non-Goals
 

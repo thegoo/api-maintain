@@ -55,6 +55,7 @@ Current work is formalizing decisions identified during proof-of-concept review.
 - `output.includeEvidence` controls whether supporting evidence records are returned.
 - `telemetry.excludeRoutes` supports exact and `*` wildcard path matching, with an independent safeguard against recursive `/intel` findings.
 - Rate-limited assessment requests use HTTP `429`, RFC 9457 Problem Details, and `Retry-After`; numeric limits remain deployment-specific.
+- `GET /intel` runs the default assessment and `POST /intel` is the required scoped-assessment method. `QUERY /intel` is optional during ecosystem adoption, while POST remains supported throughout v0.1.
 
 The specification remains experimental until it has been validated by multiple reference implementations and real-world usage.
 
