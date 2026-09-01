@@ -47,7 +47,7 @@ Schema, OpenAPI, reference implementation, and conformance artifacts are not cur
 
 The Operational Intelligence specification is at version `0.1.0-draft` and is in active development.
 
-Current work is formalizing decisions identified during proof-of-concept review. The response contract now distinguishes grouped findings from occurrence counts and defines bounded evidence output:
+The proof-of-concept review supplied 12 specification gaps. An earlier summary heading stated 13; the supplied 12-row review table is the canonical list. All 12 gaps are now reflected in the draft specification, including:
 
 - `uniqueFindingCount` counts grouped findings in a response.
 - Each finding's `count` reports the occurrences represented by that finding.
@@ -56,6 +56,7 @@ Current work is formalizing decisions identified during proof-of-concept review.
 - `telemetry.excludeRoutes` supports exact and `*` wildcard path matching, with an independent safeguard against recursive `/intel` findings.
 - Rate-limited assessment requests use HTTP `429`, RFC 9457 Problem Details, and `Retry-After`; numeric limits remain deployment-specific.
 - `GET /intel` runs the default assessment and `POST /intel` is the required scoped-assessment method. `QUERY /intel` is optional during ecosystem adoption, while POST remains supported throughout v0.1.
+- Implementation boundaries and conformance behavior are language- and framework-neutral; a reference implementation may document its own runtime and telemetry tooling.
 
 The specification remains experimental until it has been validated by multiple reference implementations and real-world usage.
 
