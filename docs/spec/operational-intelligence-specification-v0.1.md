@@ -63,7 +63,7 @@ Version 0.1 does not define:
 - business KPI assessment
 - anomaly detection
 - provider-specific backends such as Datadog or Azure Monitor
-- dashboards other than existing Aspire capabilities
+- dashboards other than capabilities already provided by the implementation's telemetry platform
 - a general-purpose telemetry query language
 
 An implementation MUST NOT claim conformance to this version based on capabilities that are outside this scope.
@@ -1164,7 +1164,7 @@ The implementation SHOULD correlate `/intel` request telemetry using trace and s
 
 The implementation MUST NOT log secrets or restricted evidence fields.
 
-Telemetry emitted by `/intel` MUST remain visible in Aspire or the configured OpenTelemetry destination, even though it is excluded from negative-path assessment by default.
+Telemetry emitted by `/intel` MUST remain visible in the configured OpenTelemetry destination, even though it is excluded from negative-path assessment by default.
 
 ## 15. Security
 
@@ -1187,8 +1187,8 @@ The POC MUST:
 
 A version 0.1 POC is complete only when all of the following are demonstrated:
 
-1. The application runs locally under Aspire.
-2. OpenTelemetry traces are visible in Aspire.
+1. The application runs locally using its documented development runtime or orchestration environment.
+2. OpenTelemetry traces are visible in the configured OpenTelemetry destination.
 3. The application loads `op-intel.yaml`.
 4. A valid profile permits `/intel` assessments.
 5. An invalid profile produces a machine-readable configuration error.
@@ -1276,7 +1276,7 @@ Given a collection request evaluates retention, time-range filtering, category f
 
 ### AC-013 — Existing Export Preserved
 
-Given normal OpenTelemetry export is configured, when the bounded collector is enabled, then telemetry MUST continue to appear in Aspire.
+Given normal OpenTelemetry export is configured, when the bounded collector is enabled, then telemetry MUST continue to appear in the configured OpenTelemetry destination.
 
 ### AC-014 — Recursive Findings Prevented
 
@@ -1340,30 +1340,19 @@ Given `QUERY /intel` is unsupported and reaches the application, then the implem
 
 ## 18. Suggested Implementation Boundaries
 
-The following names are non-normative but recommended:
+An implementation SHOULD separate the following responsibilities:
 
-```csharp
-IOperationalProfileLoader
-IOperationalProfileValidator
-IOperationalEvidenceCollector
-IOperationalAnalyzer
-IOperationalAssessmentCoordinator
-IOperationalResponseBuilder
-```
+- load the operational profile;
+- validate profile syntax and semantics;
+- collect bounded OpenTelemetry evidence;
+- analyze exception evidence;
+- analyze HTTP 5xx evidence;
+- coordinate assessment scope, availability, and status; and
+- construct protocol responses.
 
-Recommended concrete POC components:
+These responsibilities are language- and framework-neutral. This specification does not prescribe interface names, class names, modules, packages, dependency-injection patterns, or other language-specific structures.
 
-```csharp
-YamlOperationalProfileLoader
-OperationalProfileValidator
-BoundedOpenTelemetryCollector
-ExceptionAnalyzer
-Http5xxAnalyzer
-OperationalAssessmentCoordinator
-OperationalResponseBuilder
-```
-
-The implementation MAY combine components internally, but behavior MUST remain consistent with the responsibility boundaries in this specification.
+The implementation MAY combine responsibilities internally, but its observable behavior MUST remain consistent with the boundaries in this specification.
 
 ## 19. Suggested Repository Artifacts
 
@@ -1386,14 +1375,14 @@ NOTICE
 The README SHOULD document:
 
 - prerequisites;
-- how to run the Aspire AppHost;
+- how to run the application in its local development environment;
 - how to generate a test exception;
 - how to generate a test HTTP 500 response;
 - how to call `GET /intel`;
 - how to call `POST /intel`;
 - whether `QUERY /intel` is supported and, when it is, how to call it;
 - how to validate `op-intel.yaml`;
-- how to observe telemetry in Aspire; and
+- how to observe telemetry in the configured OpenTelemetry destination; and
 - known POC limitations.
 
 ## 20. Future Work
