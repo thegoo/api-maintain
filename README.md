@@ -57,6 +57,7 @@ The proof-of-concept review supplied 12 specification gaps. An earlier summary h
 - Rate-limited assessment requests use HTTP `429`, RFC 9457 Problem Details, and `Retry-After`; numeric limits remain deployment-specific.
 - `GET /intel` runs the default assessment and `POST /intel` is the required scoped-assessment method. `QUERY /intel` is optional during ecosystem adoption, while POST remains supported throughout v0.1.
 - Implementation boundaries and conformance behavior are language- and framework-neutral; a reference implementation may document its own runtime and telemetry tooling.
+- Exception and HTTP 5xx categories are assessed independently; evidence sharing a trace and span may be correlated without deduplicating category-specific findings or counts.
 
 The specification remains experimental until it has been validated by multiple reference implementations and real-world usage.
 

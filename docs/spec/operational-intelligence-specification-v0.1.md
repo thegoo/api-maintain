@@ -599,7 +599,17 @@ HTTP 5xx evidence SHOULD be grouped by:
 
 Each non-empty group MUST produce one finding.
 
-### 10.4 No Findings
+### 10.4 Independent Category Assessment and Correlation
+
+Each enabled category analyzer MUST evaluate eligible normalized evidence independently. When the same span satisfies more than one enabled category, each matching analyzer MUST produce its category-specific result according to Sections 10.2 and 10.3.
+
+An implementation MUST NOT suppress, merge, or deduplicate findings across categories solely because their evidence records share a `traceId` and `spanId`. Exception and HTTP 5xx findings describe distinct assessment dimensions, even when they arise from the same instrumented operation.
+
+Within each category, one normalized evidence record represents one occurrence for that category. The finding-level `count` and the corresponding summary count MUST include that occurrence once in that category. Version 0.1 does not define a cross-category count of unique operational occurrences.
+
+When evidence is included, consumers MAY use the combination of `traceId` and `spanId` to recognize category-specific evidence derived from the same span. Such correlation MUST NOT change the finding-level or summary-count semantics defined by this specification. When evidence is suppressed or truncated, a response is not required to provide complete cross-category correlation information.
+
+### 10.5 No Findings
 
 When:
 
@@ -610,7 +620,7 @@ the assessment status MUST be `no_findings`.
 
 `no_findings` means no configured negative-path evidence was observed during the assessed time range. It MUST NOT be represented as a general declaration that the service is healthy.
 
-### 10.5 Findings
+### 10.6 Findings
 
 When:
 
@@ -619,7 +629,7 @@ When:
 
 the assessment status MUST be `findings`.
 
-### 10.6 Partial Assessment
+### 10.7 Partial Assessment
 
 The assessment status MUST be `partial` when:
 
@@ -630,7 +640,7 @@ The assessment status MUST be `partial` when:
 
 A partial assessment MAY contain findings.
 
-### 10.7 Unable to Assess
+### 10.8 Unable to Assess
 
 The assessment status MUST be `unable_to_assess` when:
 
@@ -832,6 +842,8 @@ The `summary.message` field MUST be present when `status` is `no_findings`. It M
 ```
 
 ### 12.4 Example: Findings
+
+This example demonstrates independent category assessment. The evidence at `2026-07-30T00:03:10Z` and `2026-07-30T00:12:44Z` shares the same `traceId` and `spanId` across the exception and HTTP 5xx findings. Each pair is correlated evidence from the same span, while each record contributes once to its own category. Consequently, `uniqueFindingCount` is `2`, `exceptionCount` is `3`, and `http5xxCount` is `2`; the response does not define a total count of unique operational occurrences across both categories.
 
 ```json
 {
@@ -1337,6 +1349,14 @@ Given `query.allowTimeRangeOverride` is `false`, when `POST /intel` or supported
 Given an implementation supports `QUERY /intel`, when equivalent POST and QUERY requests are made, then both methods MUST apply identical request, validation, scope, response, error, rate-limiting, caching, telemetry, and security semantics.
 
 Given `QUERY /intel` is unsupported and reaches the application, then the implementation MUST NOT execute an assessment and MUST return HTTP `405`, `Allow: GET, POST`, RFC 9457 Problem Details, and code `query_method_not_supported`.
+
+### AC-022 — Independent Category Assessment
+
+Given one span contains eligible exception evidence and has an HTTP status code between `500` and `599`, when both categories are enabled and the assessment executes, then the exception analyzer and HTTP 5xx analyzer MUST each evaluate the span independently and MUST produce their applicable category-specific findings.
+
+Given exception and HTTP 5xx evidence records share a `traceId` and `spanId`, when findings and summary counts are constructed, then the implementation MUST NOT suppress, merge, or deduplicate either category's result solely because the evidence is correlated.
+
+Given evidence is included and category-specific records share a `traceId` and `spanId`, then consumers MAY correlate those records as manifestations of the same span but MUST NOT use that correlation to reinterpret the finding-level or summary counts as cross-category unique-occurrence counts.
 
 ## 18. Suggested Implementation Boundaries
 
