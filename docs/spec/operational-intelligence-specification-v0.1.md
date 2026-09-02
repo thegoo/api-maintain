@@ -487,6 +487,8 @@ The collector MUST return:
 
 ```text
 availability
+coverage
+categories[]
 evidence[]
 warnings[]
 errors[]
@@ -500,13 +502,41 @@ partial
 unavailable
 ```
 
-An empty evidence array MUST NOT be used to represent telemetry unavailability.
+The collector MUST record the instant at which it became capable of collecting evidence. This collector coverage start MUST NOT be derived from the first collected evidence record. An empty collector can provide complete coverage for an interval in which no matching evidence occurred.
+
+For every collection request, the collector MUST evaluate coverage against the complete requested interval. Coverage evaluation MUST account for collector startup, retention expiry, capacity eviction, collector or source availability, and category-specific availability.
+
+The internal `coverage` result MUST provide the requested start and end times, the assessable start and end times, completeness, and every known reason for incomplete coverage. The internal `categories` result MUST provide availability and reasons for every requested category. These values MUST provide sufficient information to construct the public telemetry contract in Section 12.2.
+
+When capacity eviction removes a record, the collector MUST retain sufficient metadata to determine whether that eviction overlaps a subsequently requested interval. Eviction metadata MUST itself use bounded memory and MUST be retained until no valid requested interval can overlap the eviction. This specification does not prescribe the metadata representation or collector data structure.
+
+An empty evidence array MUST NOT be used to represent telemetry unavailability. Empty evidence with complete coverage means no matching evidence was observed.
 
 Conceptual model:
 
 ```json
 {
   "availability": "available",
+  "coverage": {
+    "requestedStartTime": "2026-07-30T00:00:00Z",
+    "requestedEndTime": "2026-07-30T00:15:00Z",
+    "assessableStartTime": "2026-07-30T00:00:00Z",
+    "assessableEndTime": "2026-07-30T00:15:00Z",
+    "completeness": "complete",
+    "reasons": []
+  },
+  "categories": [
+    {
+      "category": "exceptions",
+      "availability": "available",
+      "reasons": []
+    },
+    {
+      "category": "http_5xx",
+      "availability": "available",
+      "reasons": []
+    }
+  ],
   "evidence": [],
   "warnings": [],
   "errors": []
@@ -609,7 +639,23 @@ Within each category, one normalized evidence record represents one occurrence f
 
 When evidence is included, consumers MAY use the combination of `traceId` and `spanId` to recognize category-specific evidence derived from the same span. Such correlation MUST NOT change the finding-level or summary-count semantics defined by this specification. When evidence is suppressed or truncated, a response is not required to provide complete cross-category correlation information.
 
-### 10.5 No Findings
+### 10.5 Availability Aggregation
+
+Each enabled category MUST have an availability of `available`, `partial`, or `unavailable`.
+
+- `available` means the category was assessed across the complete requested interval without known evidence loss.
+- `partial` means the category produced a usable assessment but its evidence coverage was incomplete.
+- `unavailable` means the category could not be assessed.
+
+Overall evidence availability MUST be:
+
+- `available` when every enabled category is available and overall coverage is complete;
+- `partial` when at least one enabled category is available or partial and either overall coverage or any enabled category is partial or unavailable; or
+- `unavailable` when no enabled category can be assessed.
+
+Overall evidence availability MUST agree with coverage completeness: `complete` maps to `available`, `partial` maps to `partial`, and `none` maps to `unavailable`.
+
+### 10.6 No Findings
 
 When:
 
@@ -620,7 +666,7 @@ the assessment status MUST be `no_findings`.
 
 `no_findings` means no configured negative-path evidence was observed during the assessed time range. It MUST NOT be represented as a general declaration that the service is healthy.
 
-### 10.6 Findings
+### 10.7 Findings
 
 When:
 
@@ -629,18 +675,21 @@ When:
 
 the assessment status MUST be `findings`.
 
-### 10.7 Partial Assessment
+### 10.8 Partial Assessment
 
-The assessment status MUST be `partial` when:
+The assessment status MUST be `partial` when at least one enabled category is assessable and either overall coverage or any enabled category is incomplete.
 
-- the collector reports partial availability;
-- one enabled category can be assessed but another cannot;
-- evidence was truncated in a way that may affect the assessment; or
-- collection warnings materially limit confidence.
+When the requested interval begins before the collector coverage start, the coverage reason MUST include `collector_cold_start`. If any of the requested interval remains assessable, coverage completeness and overall availability MUST be `partial`, `assessableStartTime` MUST be no earlier than the collector coverage start, and status MUST be `partial`. If the complete requested interval ends before collector coverage begins, coverage completeness MUST be `none`, both assessable times MUST be `null`, and status MUST be `unable_to_assess`.
+
+When retention expiry makes part of the requested interval unavailable, the coverage reason MUST include `retention_window_incomplete`. The result MUST be `partial` when some requested interval remains assessable and `unable_to_assess` when none remains assessable.
+
+When capacity eviction removed one or more records whose timestamps fall within the requested interval, coverage completeness and overall availability MUST be `partial`, the coverage reason MUST include `capacity_eviction`, and status MUST be `partial` when at least one category remains assessable. Capacity eviction outside the requested interval MUST NOT affect coverage, availability, or status for that assessment.
 
 A partial assessment MAY contain findings.
 
-### 10.8 Unable to Assess
+A partial assessment MUST NOT use `no_findings`, even when no findings were observed in the assessable portion.
+
+### 10.9 Unable to Assess
 
 The assessment status MUST be `unable_to_assess` when:
 
@@ -650,6 +699,12 @@ The assessment status MUST be `unable_to_assess` when:
 - an internal collection failure prevents analysis.
 
 An unable-to-assess response MUST NOT claim no findings.
+
+### 10.10 Output Shaping Does Not Affect Availability
+
+Evidence suppression and response truncation occur after assessment. `output.includeEvidence: false`, `output.maximumEvidencePerFinding`, and `evidenceTruncated: true` MUST NOT change coverage completeness, category availability, overall availability, or assessment status.
+
+A response whose returned evidence is suppressed or capped MAY still represent a complete assessment. Output evidence truncation MUST NOT by itself cause `partial`.
 
 ## 11. Protocol
 
@@ -777,7 +832,81 @@ findings
 
 Consumers of successful assessment responses MUST ignore unknown fields that they do not understand. Unknown response fields are reserved for forward-compatible extension and MUST NOT cause response processing to fail.
 
-### 12.2 Status Values
+### 12.2 Telemetry Availability and Coverage
+
+The `telemetry` object MUST contain:
+
+```text
+source
+collector
+availability
+coverage
+categories
+warnings
+```
+
+The `coverage` object MUST contain:
+
+```text
+requestedStartTime
+requestedEndTime
+assessableStartTime
+assessableEndTime
+completeness
+reasons
+```
+
+`requestedStartTime` and `requestedEndTime` MUST equal `scope.startTime` and `scope.endTime`, respectively.
+
+`assessableStartTime` and `assessableEndTime` MUST identify the bounds of the requested interval for which an assessment could be performed. Both fields MUST be `null` when no part of the requested interval is assessable. When any part is assessable, both fields MUST be ISO 8601 UTC instants, MUST fall within the requested interval, and `assessableStartTime` MUST NOT be later than `assessableEndTime`.
+
+`completeness` MUST be one of:
+
+```text
+complete
+partial
+none
+```
+
+- `complete` means the entire requested interval was assessable without known evidence loss.
+- `partial` means some useful assessment was possible but coverage was incomplete or known evidence loss occurred.
+- `none` means no useful assessment was possible.
+
+`reasons` MUST be an array of machine-readable strings. It MUST be empty when completeness is `complete` and MUST contain every known cause when completeness is `partial` or `none`.
+
+Version 0.1 defines these coverage reason codes:
+
+```text
+collector_cold_start
+retention_window_incomplete
+capacity_eviction
+category_partially_available
+category_unavailable
+collector_unavailable
+```
+
+| Reason | Meaning |
+|---|---|
+| `collector_cold_start` | The requested interval begins before the collector coverage start. |
+| `retention_window_incomplete` | Retention expiry makes some or all of the requested interval unavailable. |
+| `capacity_eviction` | Capacity enforcement removed evidence from the requested interval. |
+| `category_partially_available` | At least one enabled category has partial evidence availability. |
+| `category_unavailable` | At least one enabled category cannot be assessed. |
+| `collector_unavailable` | The collector cannot provide usable evidence for the request. |
+
+Consumers MUST ignore unknown reason codes in `coverage.reasons` and category `reasons`.
+
+The `categories` array MUST contain exactly one object for every enabled category and MUST omit disabled categories. Its order MUST equal the order of `scope.categories`. Each object MUST contain `category`, `availability`, and `reasons`.
+
+Category names MUST use the public finding category values `exceptions` and `http_5xx`. Category `availability` MUST be `available`, `partial`, or `unavailable` as defined in Section 10.5. Category `reasons` MUST be empty for `available` and MUST contain every known cause for `partial` or `unavailable`.
+
+When any category is `partial`, `coverage.reasons` MUST include `category_partially_available`. When any category is `unavailable`, `coverage.reasons` MUST include `category_unavailable`.
+
+The public `telemetry.availability` value MUST be derived according to Section 10.5 and MUST agree with `coverage.completeness`.
+
+`telemetry.warnings` MUST be an array of human-readable strings. Every `partial` or `unavailable` telemetry result MUST include at least one warning explaining the incomplete condition. Warnings supplement the structured coverage and category fields; consumers MUST NOT be required to parse warning text to determine availability. Warning text is descriptive and is not a stable machine-readable identifier.
+
+### 12.3 Status Values
 
 `status` MUST be one of:
 
@@ -806,7 +935,7 @@ Because one operational event MAY contribute to findings in more than one catego
 
 The `summary.message` field MUST be present when `status` is `no_findings`. It MAY be present for any other status.
 
-### 12.3 Example: No Findings
+### 12.4 Example: No Findings
 
 ```json
 {
@@ -828,6 +957,26 @@ The `summary.message` field MUST be present when `status` is `no_findings`. It M
     "source": "opentelemetry",
     "collector": "bounded-in-process",
     "availability": "available",
+    "coverage": {
+      "requestedStartTime": "2026-07-30T00:00:00Z",
+      "requestedEndTime": "2026-07-30T00:15:00Z",
+      "assessableStartTime": "2026-07-30T00:00:00Z",
+      "assessableEndTime": "2026-07-30T00:15:00Z",
+      "completeness": "complete",
+      "reasons": []
+    },
+    "categories": [
+      {
+        "category": "exceptions",
+        "availability": "available",
+        "reasons": []
+      },
+      {
+        "category": "http_5xx",
+        "availability": "available",
+        "reasons": []
+      }
+    ],
     "warnings": []
   },
   "status": "no_findings",
@@ -841,7 +990,7 @@ The `summary.message` field MUST be present when `status` is `no_findings`. It M
 }
 ```
 
-### 12.4 Example: Findings
+### 12.5 Example: Findings
 
 This example demonstrates independent category assessment. The evidence at `2026-07-30T00:03:10Z` and `2026-07-30T00:12:44Z` shares the same `traceId` and `spanId` across the exception and HTTP 5xx findings. Each pair is correlated evidence from the same span, while each record contributes once to its own category. Consequently, `uniqueFindingCount` is `2`, `exceptionCount` is `3`, and `http5xxCount` is `2`; the response does not define a total count of unique operational occurrences across both categories.
 
@@ -865,6 +1014,26 @@ This example demonstrates independent category assessment. The evidence at `2026
     "source": "opentelemetry",
     "collector": "bounded-in-process",
     "availability": "available",
+    "coverage": {
+      "requestedStartTime": "2026-07-30T00:00:00Z",
+      "requestedEndTime": "2026-07-30T00:15:00Z",
+      "assessableStartTime": "2026-07-30T00:00:00Z",
+      "assessableEndTime": "2026-07-30T00:15:00Z",
+      "completeness": "complete",
+      "reasons": []
+    },
+    "categories": [
+      {
+        "category": "exceptions",
+        "availability": "available",
+        "reasons": []
+      },
+      {
+        "category": "http_5xx",
+        "availability": "available",
+        "reasons": []
+      }
+    ],
     "warnings": []
   },
   "status": "findings",
@@ -960,7 +1129,163 @@ This example demonstrates independent category assessment. The evidence at `2026
 }
 ```
 
-### 12.5 Example: Truncated Evidence
+### 12.6 Example: Cold-Start Partial Assessment
+
+This example requests 15 minutes of coverage five minutes after the collector became capable of collecting evidence. No findings were observed in the assessable portion, but the response MUST NOT claim `no_findings` because the first ten minutes were not assessed.
+
+```json
+{
+  "specVersion": "0.1",
+  "assessmentId": "6b27d5a1-8c34-4e90-b2f6-7d1a9c3e5b48",
+  "service": {
+    "name": "sample-api"
+  },
+  "generatedAt": "2026-07-30T00:15:00Z",
+  "scope": {
+    "startTime": "2026-07-30T00:00:00Z",
+    "endTime": "2026-07-30T00:15:00Z",
+    "categories": [
+      "exceptions",
+      "http_5xx"
+    ]
+  },
+  "telemetry": {
+    "source": "opentelemetry",
+    "collector": "bounded-in-process",
+    "availability": "partial",
+    "coverage": {
+      "requestedStartTime": "2026-07-30T00:00:00Z",
+      "requestedEndTime": "2026-07-30T00:15:00Z",
+      "assessableStartTime": "2026-07-30T00:10:00Z",
+      "assessableEndTime": "2026-07-30T00:15:00Z",
+      "completeness": "partial",
+      "reasons": [
+        "collector_cold_start",
+        "category_partially_available"
+      ]
+    },
+    "categories": [
+      {
+        "category": "exceptions",
+        "availability": "partial",
+        "reasons": [
+          "collector_cold_start"
+        ]
+      },
+      {
+        "category": "http_5xx",
+        "availability": "partial",
+        "reasons": [
+          "collector_cold_start"
+        ]
+      }
+    ],
+    "warnings": [
+      "The collector began collecting at 2026-07-30T00:10:00Z; the interval from 2026-07-30T00:00:00Z through 2026-07-30T00:10:00Z was not assessed."
+    ]
+  },
+  "status": "partial",
+  "summary": {
+    "uniqueFindingCount": 0,
+    "exceptionCount": 0,
+    "http5xxCount": 0,
+    "message": "No findings were observed in the assessable portion of the requested time range."
+  },
+  "findings": []
+}
+```
+
+### 12.7 Example: Mixed-Category Partial Assessment
+
+This example has complete exception evidence but no assessable HTTP 5xx source. The exception finding is valid, while the overall result is `partial` because not every enabled category was assessed.
+
+```json
+{
+  "specVersion": "0.1",
+  "assessmentId": "9c41e7b2-3a65-4d08-8f29-6b5d1e7a3c90",
+  "service": {
+    "name": "sample-api"
+  },
+  "generatedAt": "2026-07-30T00:15:00Z",
+  "scope": {
+    "startTime": "2026-07-30T00:00:00Z",
+    "endTime": "2026-07-30T00:15:00Z",
+    "categories": [
+      "exceptions",
+      "http_5xx"
+    ]
+  },
+  "telemetry": {
+    "source": "opentelemetry",
+    "collector": "bounded-in-process",
+    "availability": "partial",
+    "coverage": {
+      "requestedStartTime": "2026-07-30T00:00:00Z",
+      "requestedEndTime": "2026-07-30T00:15:00Z",
+      "assessableStartTime": "2026-07-30T00:00:00Z",
+      "assessableEndTime": "2026-07-30T00:15:00Z",
+      "completeness": "partial",
+      "reasons": [
+        "category_unavailable"
+      ]
+    },
+    "categories": [
+      {
+        "category": "exceptions",
+        "availability": "available",
+        "reasons": []
+      },
+      {
+        "category": "http_5xx",
+        "availability": "unavailable",
+        "reasons": [
+          "category_unavailable"
+        ]
+      }
+    ],
+    "warnings": [
+      "HTTP 5xx evidence was unavailable for the requested time range."
+    ]
+  },
+  "status": "partial",
+  "summary": {
+    "uniqueFindingCount": 1,
+    "exceptionCount": 1,
+    "http5xxCount": 0,
+    "message": "Exception findings were produced, but HTTP 5xx evidence was unavailable."
+  },
+  "findings": [
+    {
+      "id": "finding-001",
+      "category": "exceptions",
+      "severity": "error",
+      "title": "InvalidOperationException observed",
+      "description": "One InvalidOperationException event was observed for POST /orders.",
+      "firstObservedAt": "2026-07-30T00:08:21Z",
+      "lastObservedAt": "2026-07-30T00:08:21Z",
+      "count": 1,
+      "dimensions": {
+        "exceptionType": "System.InvalidOperationException",
+        "operationName": "POST /orders",
+        "httpRoute": "/orders"
+      },
+      "evidence": [
+        {
+          "timestamp": "2026-07-30T00:08:21Z",
+          "traceId": "7a3c1e9b5d2f4a608c7e1b3d9f5a2c40",
+          "spanId": "1b2c3d4e5f607182",
+          "operationName": "POST /orders",
+          "category": "exception",
+          "exceptionType": "System.InvalidOperationException",
+          "exceptionMessage": "Order state was invalid."
+        }
+      ]
+    }
+  ]
+}
+```
+
+### 12.8 Example: Truncated Evidence
 
 The following finding assumes `output.includeEvidence` is `true` and `output.maximumEvidencePerFinding` is `1`:
 
@@ -994,7 +1319,7 @@ The following finding assumes `output.includeEvidence` is `true` and `output.max
 }
 ```
 
-### 12.6 Finding Requirements
+### 12.9 Finding Requirements
 
 Each finding MUST contain:
 
@@ -1212,7 +1537,7 @@ A version 0.1 POC is complete only when all of the following are demonstrated:
 11. A generated HTTP 5xx response is collected and returned as a finding.
 12. No matching negative-path evidence returns `no_findings`.
 13. Telemetry unavailability returns `unable_to_assess`.
-14. Partial evidence availability returns `partial`.
+14. Incomplete requested-window coverage or mixed category availability returns `partial` with structured coverage, category availability, reasons, and warnings.
 15. `/intel` requests emit telemetry.
 16. `/intel` telemetry does not create recursive findings.
 17. Collector retention is bounded.
@@ -1357,6 +1682,34 @@ Given one span contains eligible exception evidence and has an HTTP status code 
 Given exception and HTTP 5xx evidence records share a `traceId` and `spanId`, when findings and summary counts are constructed, then the implementation MUST NOT suppress, merge, or deduplicate either category's result solely because the evidence is correlated.
 
 Given evidence is included and category-specific records share a `traceId` and `spanId`, then consumers MAY correlate those records as manifestations of the same span but MUST NOT use that correlation to reinterpret the finding-level or summary counts as cross-category unique-occurrence counts.
+
+### AC-023 — Coverage and Partial Assessment
+
+Given the complete requested interval is covered and every enabled category is available, when no analyzer produces a finding, then coverage completeness and telemetry availability MUST be `complete` and `available`, respectively, and status MUST be `no_findings`.
+
+Given the complete requested interval is covered and every enabled category is available, when at least one analyzer produces a finding, then coverage completeness and telemetry availability MUST be `complete` and `available`, respectively, and status MUST be `findings`.
+
+Given the requested interval begins before the collector coverage start and some requested interval remains assessable, then coverage completeness and telemetry availability MUST be `partial`, coverage reasons MUST include `collector_cold_start`, and status MUST be `partial`.
+
+Given the requested interval ends before collector coverage begins, then coverage completeness MUST be `none`, assessable start and end times MUST be `null`, telemetry availability MUST be `unavailable`, and status MUST be `unable_to_assess`.
+
+Given retention expiry makes part of the requested interval unavailable, then coverage reasons MUST include `retention_window_incomplete`; status MUST be `partial` when some requested interval remains assessable and `unable_to_assess` when none remains assessable.
+
+Given capacity eviction removed a record inside the requested interval, then coverage completeness and telemetry availability MUST be `partial`, coverage reasons MUST include `capacity_eviction`, and status MUST be `partial` when at least one category remains assessable.
+
+Given capacity eviction removed records only outside the requested interval, then that eviction MUST NOT affect coverage completeness, category availability, telemetry availability, or status for the assessment.
+
+Given one enabled category is available and another enabled category is unavailable, then coverage completeness and telemetry availability MUST be `partial`, coverage reasons MUST include `category_unavailable`, and status MUST be `partial`.
+
+Given no enabled category is assessable, then coverage completeness MUST be `none`, telemetry availability MUST be `unavailable`, and status MUST be `unable_to_assess`.
+
+Given `output.includeEvidence` is `false`, then evidence suppression MUST NOT change coverage completeness, category availability, telemetry availability, or status.
+
+Given returned evidence is limited by `output.maximumEvidencePerFinding` and `evidenceTruncated` is `true`, then response truncation MUST NOT change coverage completeness, category availability, telemetry availability, or status.
+
+Given a successful assessment response, then `telemetry.availability`, `telemetry.coverage.completeness`, every enabled category availability, and top-level status MUST satisfy the aggregation rules in Sections 10.5 through 10.10.
+
+Given telemetry availability is `partial` or `unavailable`, then structured reasons MUST describe every known cause and `telemetry.warnings` MUST contain at least one human-readable explanation.
 
 ## 18. Suggested Implementation Boundaries
 

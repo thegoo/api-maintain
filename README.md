@@ -58,6 +58,7 @@ The proof-of-concept review supplied 12 specification gaps. An earlier summary h
 - `GET /intel` runs the default assessment and `POST /intel` is the required scoped-assessment method. `QUERY /intel` is optional during ecosystem adoption, while POST remains supported throughout v0.1.
 - Implementation boundaries and conformance behavior are language- and framework-neutral; a reference implementation may document its own runtime and telemetry tooling.
 - Exception and HTTP 5xx categories are assessed independently; evidence sharing a trace and span may be correlated without deduplicating category-specific findings or counts.
+- Coverage and enabled-category availability are reported explicitly; incomplete collection windows produce `partial` or `unable_to_assess`, while evidence suppression and response truncation do not change assessment completeness.
 
 The specification remains experimental until it has been validated by multiple reference implementations and real-world usage.
 
